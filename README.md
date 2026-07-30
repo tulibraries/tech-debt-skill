@@ -1,6 +1,14 @@
-# Tech Debt Audit Skill for Claude Code
+# Tech Debt Audit Skill
 
-A [Claude Code](https://claude.ai/claude-code) skill that generates comprehensive technical debt audits for Ruby and Rails applications.
+A technical-debt audit skill for Ruby and Rails applications, compatible with both Claude Code and OpenAI Codex.
+
+This fork is based on FastRuby.io's open-source Tech Debt Audit Skill. It retains the original Claude Code implementation and adds a Codex-compatible version.
+
+## Supported Agents
+Claude Code — Uses the skill under .claude/skills/tech-debt-audit
+OpenAI Codex — Uses the Codex-compatible SKILL.md at the repository root
+
+Both versions follow the same technical-debt audit workflow and generate the same report format. Agent-specific files differ only where required by each platform.
 
 ## What It Does
 
@@ -37,15 +45,26 @@ tech-debt-audit-YYYYMMDD-HHMMSS/
 
 ## Installation
 
+### CLaude Code
 From your Rails project directory, run:
 
 ```bash
 mkdir -p .claude/skills
-git clone https://github.com/fastruby/tech-debt-skill.git .claude/skills/tech-debt-audit
+git clone https://github.com/tulibraries/tech-debt-skill.git .claude/skills/tech-debt-audit
 ```
+
+### OpenAI Codex
+From your Rails project directory, run:
+
+```bash
+mkdir -p .agents/skills
+git clone https://github.com/tulibraries/tech-debt-skill.git .agents/skills/tech-debt-audit
+```
+The repository root contains the Codex-compatible SKILL.md, so the cloned directory is itself the Codex skill.
 
 ## Usage
 
+### Claude Code
 Once installed, run the audit with:
 
 ```bash
@@ -56,6 +75,33 @@ Or specify a directory:
 
 ```bash
 claude /tech-debt-audit ./path/to/project
+```
+
+### OpenAI Codex
+Open Codex from the project you want to audit.
+
+Inside the Codex prompt, enter:
+
+/skills
+
+Select tech-debt-audit, then ask:
+
+Audit this repository.
+
+You can also explicitly mention the skill by typing $, selecting tech-debt-audit, and adding your request:
+
+$tech-debt-audit Audit this repository.
+
+The $tech-debt-audit text is entered in the Codex prompt. It is not a terminal command.
+
+To audit another directory:
+
+$tech-debt-audit Audit the project in ../path/to/project.
+
+Codex may also activate the skill automatically when you make a request that matches its description, such as:
+
+Perform a comprehensive technical debt audit of this Ruby application.
+
 ```
 
 ## Sample Output
