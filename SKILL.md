@@ -57,8 +57,9 @@ Unless the user explicitly asks for a different scope, use these rules:
   file is the root `Gemfile.lock` in the target directory. Ignore nested lockfiles such as
   `.ruby-lsp/Gemfile.lock`, `solr/configs/*/Gemfile.lock`, example apps, vendored samples,
   or tool-internal lockfiles unless the user explicitly asks to include them.
-- For JavaScript dependency freshness and audit scoring, the authoritative lock file is the
-  root `package-lock.json`, `yarn.lock`, or `pnpm-lock.yaml` in the target directory.
+- For JavaScript dependency freshness and audit scoring, use the package manager that matches
+  the root lockfile in the target directory. For this skill, `yarn.lock` means use Yarn and
+  `package-lock.json` means use npm. Do not generate a new lockfile just to make a tool run.
   Ignore nested lockfiles unless the user explicitly asks to include them.
 - Count dependencies from the authoritative lockfiles across all groups, including
   development and test dependencies. They still affect local setup, CI, and supply-chain
@@ -79,6 +80,8 @@ rules below instead of guessing.
 - `bundler-audit`, `brakeman`, `bundler-leak`, `trivy`, `npm audit`, `yarn audit`:
   failed tools are treated as unavailable inputs for `Security`; score from the remaining
   successful tools and state which inputs were unavailable.
+- If the JS audit or outdated command does not match the repository's root lockfile, mark the
+  JS portion of the run as non-comparable and do not mix those results into trend comparisons.
 - `next_rails` failure with successful `libyear-bundler`: score `Dependencies` from
   `libyear.txt` only.
 - `libyear-bundler` failure with successful `next_rails`: score `Dependencies` from
@@ -138,7 +141,7 @@ so the final report can quote exact numbers and the run is reproducible.
 ## Step 1: Detect Project Type
 
 - **Ruby/Rails**: `Gemfile`, `Gemfile.lock`, `*.rb` files
-- **JavaScript/Node.js**: `package.json`, `package-lock.json`, `yarn.lock`
+- **JavaScript/Node.js**: `package.json`, `yarn.lock`, `package-lock.json`
 - **Both**: many Rails apps have both
 
 Only run the checks that apply to what you detect.
@@ -184,10 +187,7 @@ Goal: zero HIGH/CRITICAL findings and no leaked secrets. Summarize counts by sev
 ### JavaScript (if package.json exists)
 
 ```bash
-# If no lock file, generate one first
-[ -f package-lock.json ] || npm i --package-lock-only
-npm audit > "$OUT/raw/npm-audit.txt" 2>&1
-# yarn projects: yarn audit > "$OUT/raw/yarn-audit.txt" 2>&1
+yarn audit > "$OUT/raw/yarn-audit.txt" 2>&1
 ```
 
 ## Step 3: Dependency Freshness
@@ -204,7 +204,7 @@ Track outdated percentage and total libyears behind.
 
 ### JavaScript (if package.json exists)
 ```bash
-npm outdated > "$OUT/raw/npm-outdated.txt" 2>&1
+yarn outdated > "$OUT/raw/yarn-outdated.txt" 2>&1
 ```
 
 ## Step 4: Code Coverage
