@@ -184,6 +184,11 @@ Make sure your project has [SimpleCov](https://github.com/simplecov-ruby/simplec
 - 5: <60% outdated, <50 libyears
 - 0: >60% outdated or >50 libyears
 
+Dependency scoring only uses parseable tool output. If `next_rails` returns placeholder data
+such as `latest version, NOT FOUND` or widespread `Jan 2, 1980` dates, ignore `outdated.txt`
+and score from `libyear.txt` only. If `libyear-bundler` fails because RubyGems cannot be
+reached, rerun it with network access before treating the category as unavailable.
+
 ### Coverage (20 points)
 - 20: >90% coverage
 - 15: 70-90% coverage

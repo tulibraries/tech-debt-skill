@@ -82,10 +82,16 @@ rules below instead of guessing.
   successful tools and state which inputs were unavailable.
 - If the JS audit or outdated command does not match the repository's root lockfile, mark the
   JS portion of the run as non-comparable and do not mix those results into trend comparisons.
-- `next_rails` failure with successful `libyear-bundler`: score `Dependencies` from
-  `libyear.txt` only.
-- `libyear-bundler` failure with successful `next_rails`: score `Dependencies` from
-  `outdated.txt` only.
+- Treat `next_rails` output as unparseable if it contains placeholder freshness data such as
+  repeated `latest version, NOT FOUND`, repeated `latest_age: "-"`, or widespread
+  `Jan  2, 1980`/`1980-01-02` release dates. In that case, do not score from `outdated.txt`.
+- If `libyear-bundler` fails with a network or DNS error in the sandbox, retry it once with
+  network access. If the retried command succeeds, use the retried `libyear.txt` as the
+  authoritative dependency freshness input for that run.
+- `next_rails` failure or unparseable output with successful `libyear-bundler`: score
+  `Dependencies` from `libyear.txt` only.
+- `libyear-bundler` failure with successful and parseable `next_rails`: score `Dependencies`
+  from `outdated.txt` only.
 - If both dependency inputs fail or are unparseable, mark the dependency category as
   unavailable in the report. Use `0` in the numeric table only because the template requires
   a number, and explicitly say the category is unavailable rather than "bad".
@@ -204,7 +210,11 @@ ruby -I"$NEXT_RAILS_ROOT/lib" "$NEXT_RAILS_ROOT/exe/bundle_report" outdated   > 
 gem install libyear-bundler --no-document
 libyear-bundler --all > "$OUT/raw/libyear.txt" 2>&1
 ```
-Track outdated percentage and total libyears behind.
+If `outdated.txt` shows placeholder data such as `latest version, NOT FOUND`, `latest_age: "-"`,
+or widespread `Jan  2, 1980`/`1980-01-02` dates, treat it as unparseable and fall back to
+`libyear.txt`. If `libyear-bundler` fails with a network or DNS error, rerun that command once
+with network access before marking the dependency category unavailable. Track outdated percentage
+and total libyears behind only from parseable outputs.
 
 ### JavaScript (if package.json exists)
 ```bash
