@@ -195,7 +195,11 @@ yarn audit > "$OUT/raw/yarn-audit.txt" 2>&1
 ### Ruby (if Gemfile exists)
 ```bash
 gem install next_rails --no-document
-bundle_report outdated --without-bundler > "$OUT/raw/outdated.txt" 2>&1
+# Run the gem executable directly and add its lib/ path explicitly.
+# Some Ruby 3.4 setups fail to load the global executable wrapper, and
+# next_rails 1.6.0 does not support the old --without-bundler flag.
+NEXT_RAILS_ROOT="$(ruby -e 'print Gem::Specification.find_by_name("next_rails").full_gem_path')"
+ruby -I"$NEXT_RAILS_ROOT/lib" "$NEXT_RAILS_ROOT/exe/bundle_report" outdated   > "$OUT/raw/outdated.txt" 2>&1
 
 gem install libyear-bundler --no-document
 libyear-bundler --all > "$OUT/raw/libyear.txt" 2>&1
