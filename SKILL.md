@@ -443,8 +443,23 @@ at `$OUT/index.html`.
 
 8. **Write the filled HTML** to `$OUT/index.html`.
 
-9. **Report back** to the user with the path to `$OUT/index.html` and a one-paragraph
-   summary of the health score and the top recommendation.
+9. **Export a shareable PDF copy** named `<repo>-tech-debt-audit-YYYY-MM-DD.pdf` inside
+   `$OUT/` using the report date from the run. Prefer the repository directory name for
+   `<repo>`, lowercased exactly as checked out. Use headless Chrome if available:
+   ```bash
+   REPO_NAME="$(basename "$(pwd)")"
+   REPORT_DATE="$(date +%F)"
+   PDF_NAME="${REPO_NAME}-tech-debt-audit-${REPORT_DATE}.pdf"
+   CHROME="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+   "$CHROME" --headless=new --disable-gpu \
+     --print-to-pdf="$(pwd)/$OUT/$PDF_NAME" \
+     "file://$(pwd)/$OUT/index.html"
+   ```
+   If Chrome is unavailable or PDF export fails, keep the HTML report as the authoritative
+   deliverable and note that the PDF could not be generated.
+
+10. **Report back** to the user with the path to `$OUT/index.html`, the PDF path if it was
+    generated, and a one-paragraph summary of the health score and the top recommendation.
 
 ---
 

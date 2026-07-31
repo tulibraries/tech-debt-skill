@@ -12,7 +12,7 @@ Both versions follow the same technical-debt audit workflow and generate the sam
 
 ## What It Does
 
-This skill automates the process of running multiple code quality and security tools, then compiles the results into a **single, self-contained HTML report**. It analyzes:
+This skill automates the process of running multiple code quality and security tools, then compiles the results into a **single, self-contained HTML report**. When headless Chrome is available, it also exports a shareable PDF named `<repo>-tech-debt-audit-YYYY-MM-DD.pdf`. It analyzes:
 
 - **Security Vulnerabilities**: bundler-audit, Brakeman, bundler-leak, Trivy
 - **Dependency Freshness**: next_rails, libyear-bundler
@@ -38,6 +38,7 @@ All output from a run is stored in one **timestamped directory** so you can keep
 ```
 tech-debt-audit-YYYYMMDD-HHMMSS/
 ├── index.html          <- the single self-contained report
+├── <repo>-tech-debt-audit-YYYY-MM-DD.pdf  <- shareable PDF export when Chrome is available
 ├── raw/                <- raw text/JSON output from every tool
 ├── rubycritic/         <- RubyCritic's generated HTML report
 └── screenshots/        <- PNG screenshots embedded into index.html
