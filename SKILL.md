@@ -26,6 +26,85 @@ because it's missing from the Gemfile. Install Ruby tools globally with `gem ins
 run them directly (not via `bundle exec`) to avoid version conflicts with the project's
 Gemfile.
 
+## Deterministic Rubric Rules
+
+Apply these rules for this Codex skill so repeated runs produce comparable results.
+
+### 1. Machine-checkable inputs only
+
+Every scored category must be backed by files in `$OUT/raw/` or by repository files that
+can be checked directly.
+
+- `Security`: `bundler-audit.txt`, `brakeman.txt`, `bundler-leak.txt`, `trivy.json`,
+  `npm-audit.txt` or `yarn-audit.txt`
+- `Dependencies`: `outdated.txt`, `libyear.txt`, `npm-outdated.txt`
+- `Coverage`: `coverage-last-run.json`
+- `Complexity`: `rubycritic.txt`, `skunk.txt`, RubyCritic HTML output
+- `Maintainability`: presence/absence checks for CI, setup scripts, setup docs,
+  `.env.example`, exception tracking, and performance monitoring
+
+Do not use subjective language such as "good setup" unless it is tied to the checks below.
+
+### 2. Fixed scan scope
+
+Unless the user explicitly asks for a different scope, use these rules:
+
+- Audit the requested target directory only.
+- Exclude generated and dependency directories from filesystem-wide scans where the tool
+  supports exclusions: `.git`, `node_modules`, `vendor/bundle`, `coverage`, `tmp`,
+  existing `tech-debt-audit-*` output directories, and `.ruby-lsp`.
+- For Ruby dependency freshness and Ruby dependency security scoring, the authoritative lock
+  file is the root `Gemfile.lock` in the target directory. Ignore nested lockfiles such as
+  `.ruby-lsp/Gemfile.lock`, `solr/configs/*/Gemfile.lock`, example apps, vendored samples,
+  or tool-internal lockfiles unless the user explicitly asks to include them.
+- For JavaScript dependency freshness and audit scoring, the authoritative lock file is the
+  root `package-lock.json`, `yarn.lock`, or `pnpm-lock.yaml` in the target directory.
+  Ignore nested lockfiles unless the user explicitly asks to include them.
+- Count dependencies from the authoritative lockfiles across all groups, including
+  development and test dependencies. They still affect local setup, CI, and supply-chain
+  risk.
+- Count repository-owned Dockerfiles and IaC misconfigurations reported by Trivy when they
+  are inside the target directory and not in an excluded path. These findings affect the
+  `Security` score.
+
+If the repository has multiple first-class applications and no single root lockfile
+represents the project, note that the run is partial and score only the app the user
+targeted.
+
+### 3. Tool failure handling
+
+If a tool fails, keep its raw output, note the failure in the report, and apply the fallback
+rules below instead of guessing.
+
+- `bundler-audit`, `brakeman`, `bundler-leak`, `trivy`, `npm audit`, `yarn audit`:
+  failed tools are treated as unavailable inputs for `Security`; score from the remaining
+  successful tools and state which inputs were unavailable.
+- `next_rails` failure with successful `libyear-bundler`: score `Dependencies` from
+  `libyear.txt` only.
+- `libyear-bundler` failure with successful `next_rails`: score `Dependencies` from
+  `outdated.txt` only.
+- If both dependency inputs fail or are unparseable, mark the dependency category as
+  unavailable in the report. Use `0` in the numeric table only because the template requires
+  a number, and explicitly say the category is unavailable rather than "bad".
+- If the test suite cannot run but `coverage/.last_run.json` exists, use that file and mark
+  coverage as stale.
+- If SimpleCov data is missing entirely, `Coverage` is `0`.
+- If RubyCritic or Skunk fails, score `Complexity` from the successful tool and mark the
+  missing tool as unavailable. If both fail, `Complexity` is `0`.
+
+### 4. Live advisory data and comparability
+
+Security and dependency audit tools can change results over time even when the codebase does
+not change. For each run, capture tool versions and note advisory-data volatility in the
+report appendix.
+
+- Record the versions of `bundler-audit`, `brakeman`, `bundler-leak`, `trivy`, `npm`, and
+  `yarn` when those tools are used.
+- Treat `Security` comparisons across runs as valid only when tool versions and advisory
+  inputs are materially comparable.
+- If the advisory snapshot or tool versions differ and you cannot normalize them, state
+  `Security not directly comparable to prior runs`.
+
 ---
 
 ## Step 0: Create the Timestamped Output Directory
@@ -98,6 +177,8 @@ command -v trivy >/dev/null 2>&1 || brew install trivy
 trivy fs --scanners vuln,secret,misconfig --format table . > "$OUT/raw/trivy.txt" 2>&1
 trivy fs --scanners vuln,secret,misconfig --format json  . > "$OUT/raw/trivy.json" 2>&1
 ```
+Use the fixed scope rules above when configuring exclusions. Repository-owned Dockerfiles and
+IaC files count toward `Security`; nested tool caches and generated output do not.
 Goal: zero HIGH/CRITICAL findings and no leaked secrets. Summarize counts by severity.
 
 ### JavaScript (if package.json exists)
@@ -252,6 +333,24 @@ flying blind on performance regressions — flag it as an issue.
 Check for `bin/setup`, `docker-compose.yml`, README setup instructions, CI config
 (`.github/workflows/`, `.circleci/`), and `.env.example`.
 
+For `Maintainability`, use only these machine-checkable checks:
+
+- `CI present`: `.github/workflows/*.yml`, `.github/workflows/*.yaml`, `.circleci/config.yml`,
+  `.buildkite/`, or equivalent checked-in CI config
+- `Setup script present`: `bin/setup`, `script/setup`, `bin/bootstrap`, or `make setup`
+- `README setup docs present`: `README*` contains a dedicated setup or installation section
+- `.env.example present`: `.env.example`, `.env.sample`, or `.env.template`
+- `Exception tracking present`: gems found by Step 8 exception tracking check
+- `APM/performance monitoring present`: gems found by Step 8 performance monitoring check
+
+Score `Maintainability` from the number of checks that pass:
+
+- 20: 6 of 6
+- 15: 5 of 6
+- 10: 3-4 of 6
+- 5: 2 of 6
+- 0: 0-1 of 6
+
 ---
 
 ## Step 10: Assemble the Single HTML Report
@@ -345,11 +444,26 @@ at `$OUT/index.html`.
 - 0: Critical vulnerabilities or leaked secrets
 
 ### Dependencies (20)
+- If both `outdated.txt` and `libyear.txt` are available:
 - 20: <10% outdated, <5 libyears
 - 15: <20% outdated, <15 libyears
 - 10: <40% outdated, <30 libyears
 - 5: <60% outdated, <50 libyears
-- 0: >60% outdated or >50 libyears
+- 0: >=60% outdated or >=50 libyears
+- If only `libyear.txt` is available:
+- 20: <5 libyears
+- 15: <15 libyears
+- 10: <30 libyears
+- 5: <50 libyears
+- 0: >=50 libyears
+- If only `outdated.txt` is available:
+- 20: <10% outdated
+- 15: <20% outdated
+- 10: <40% outdated
+- 5: <60% outdated
+- 0: >=60% outdated
+- If neither file is available, the category is unavailable. Use `0` in the numeric table and
+  explicitly state that the dependency score is unavailable due to tool failure.
 
 ### Complexity (20)
 - 20: No files with complexity >10
@@ -362,11 +476,11 @@ at `$OUT/index.html`.
 - 20: >90% · 15: 70-90% · 10: 50-70% · 5: 30-50% · 0: <30%
 
 ### Maintainability (20)
-- 20: Excellent setup, CI, documentation
-- 15: Good setup with minor gaps
-- 10: Adequate but needs improvement
-- 5: Significant maintainability issues
-- 0: Major maintainability problems
+- 20: 6 of 6 checks present
+- 15: 5 of 6 checks present
+- 10: 3-4 of 6 checks present
+- 5: 2 of 6 checks present
+- 0: 0-1 of 6 checks present
 
 ## Important Notes
 
