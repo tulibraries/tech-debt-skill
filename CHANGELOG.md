@@ -27,6 +27,9 @@ All notable changes to this skill are documented here. The format is based on
 
 ### Changed
 - Replaced Rails' native `rake stats` with `rails_stats`.
+- Tightened the Codex/ChatGPT skill implementation with deterministic interpretation rules,
+  stable tie-breakers, fixed executive-summary structure, and recommendation ordering rules
+  while keeping the same visible scoring rubric as the Claude version.
 
 ### Removed
 - All references to Code Climate (a discontinued service).

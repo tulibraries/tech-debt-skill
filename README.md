@@ -211,6 +211,13 @@ reached, rerun it with network access before treating the category as unavailabl
 - 5: Significant maintainability issues
 - 0: Major maintainability problems
 
+The Codex/ChatGPT version uses the same visible scoring system as Claude and adds fixed
+interpretation/prose rules underneath it to reduce run-to-run drift:
+
+- The executive summary is always exactly 4 sentences.
+- Recommendations are ranked by category severity, then metric size, then alphabetical tie-breakers.
+- Unavailable categories stay at `0` in the HTML table for template compatibility but are labeled `Unavailable` in prose.
+
 ## Customization
 
 The skill is defined in markdown, making it easy to customize:

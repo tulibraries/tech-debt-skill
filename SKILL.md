@@ -114,6 +114,49 @@ report appendix.
 - If the advisory snapshot or tool versions differ and you cannot normalize them, state
   `Security not directly comparable to prior runs`.
 
+### 5. Deterministic scoring procedure
+
+Use the same visible 100-point scoring system as the Claude version. Tighten consistency by
+standardizing how the existing score bands are interpreted, not by inventing new score bands.
+
+- `Total score` = `Security + Dependencies + Coverage + Complexity + Maintainability`
+- `Category badge`: `Pass` for 15-20, `Warning` for 10, `Fail` for 0-5
+- If multiple tools contribute to one category, calculate the category from the worst
+  qualifying threshold reached by any counted input unless the fallback rules above say to
+  ignore that input.
+- When a category is unavailable because every required tool failed, keep the numeric table at
+  `0` only for template compatibility and explicitly label the category `Unavailable` in the
+  prose.
+
+### 6. Deterministic prose generation
+
+Keep the narrative stable across runs by using fixed ordering and sentence templates.
+
+- `Executive summary`: exactly 4 sentences.
+- Sentence 1 must report the total score as `This audit scored X/100.`
+- Sentence 2 must name the lowest-scoring category or categories.
+- Sentence 3 must name the single highest-severity security or dependency issue if one exists;
+  otherwise name the largest complexity or coverage problem.
+- Sentence 4 must name the strongest area or say `No category scored in the pass range.`
+- `Top 3 recommendations`: rank by category severity first, then by numeric magnitude inside
+  that category, then alphabetically by file path or gem name as the final tie-breaker.
+- Use imperative wording. Start each recommendation title with a verb such as `Upgrade`,
+  `Remediate`, `Add`, `Reduce`, or `Document`.
+- Do not recommend work that is not directly backed by the collected files or repository
+  checks.
+
+### 7. Stable parsing and tie-breakers
+
+When raw outputs contain multiple candidate values, use these tie-breakers so repeated runs
+land on the same result.
+
+- For severity-driven categories, use the highest severity present.
+- For file-based findings, sort ties by descending metric value, then ascending file path.
+- For gem-based findings, sort ties by descending severity, then ascending gem name.
+- For percentages, round to the nearest whole number before mapping to score bands.
+- If a tool emits both a summary count and itemized rows, trust the summary count unless it is
+  obviously inconsistent with the rows.
+
 ---
 
 ## Step 0: Create the Timestamped Output Directory
@@ -382,7 +425,9 @@ at `$OUT/index.html`.
 2. **Score each category** using the Scoring Guidelines below, then fill the executive
    summary and health-score table. For each `{{*_PCT}}` marker, use `score / 20 * 100`
    (e.g. a 15/20 → `75`) so the progress bars render correctly. For each `{{*_BADGE}}`,
-   emit `<span class="badge pass">Pass</span>`, `warn`/`Warning`, or `fail`/`Fail`.
+   emit `<span class="badge pass">Pass</span>`, `warn`/`Warning`, or `fail`/`Fail`. If a
+   category is unavailable because all required tools failed, keep the numeric score at `0`
+   and use `<span class="badge warn">Unavailable</span>`.
    Set `{{SCORE_CLASS}}` on the big total score by severity so the number is NOT misleadingly
    green when the score is poor: `low` for a total under 50 (red), `mid` for 50-74 (yellow),
    `high` for 75-100 (green).
@@ -417,13 +462,13 @@ at `$OUT/index.html`.
    to `{{RUBYCRITIC_EXTRA_SHOTS}}` as additional `<div class="shot">…</div>` blocks (embed
    those base64 too). If a screenshot is missing, remove that `<div class="shot">` block.
 
-5. **Executive summary** (`{{EXECUTIVE_SUMMARY}}`): 3-5 sentences synthesizing findings
-   across ALL reports — the health score, the most serious risks, and the standout
-   strengths.
+5. **Executive summary** (`{{EXECUTIVE_SUMMARY}}`): exactly 4 sentences using the
+   deterministic prose rules above. Keep the sentences factual and anchored to the extracted
+   counts and fixed category scores.
 
 6. **Top 3 recommended actions** (`{{REC1_*}}`–`{{REC3_*}}`): the three highest-impact
    actions to address the highest-priority issues found. Be specific — name the exact gem,
-   CVE, or file, and say what to do. Order by impact/urgency.
+   CVE, or file, and say what to do. Order them with the deterministic ranking rules above.
 
 7. **Appendix** (`{{TOOLS_TABLE}}`, wrapped in `<div class="table-wrap">`): a table of every
    tool run with its purpose. Link each tool name to its open source project page, e.g.
@@ -466,11 +511,21 @@ at `$OUT/index.html`.
 ## Scoring Guidelines (0-100 total, 20 per category)
 
 ### Security (20)
-- 20: No vulnerabilities (bundler-audit, Brakeman, bundler-leak, Trivy all clean)
+- 20: No vulnerabilities
 - 15: Low severity only
 - 10: Some medium severity
 - 5: High severity issues
-- 0: Critical vulnerabilities or leaked secrets
+- 0: Critical vulnerabilities
+
+Interpretation rules for consistency:
+
+- Score from the highest severity found across `bundler-audit`, `brakeman`, `bundler-leak`,
+  `trivy`, and the matching JS audit for the root lockfile.
+- Treat leaked secrets as `0`.
+- Treat Brakeman `High` confidence warnings as `0`, `Medium` as `10`, and `Weak` as `15`.
+- Treat any `bundle-leak` finding as at least `5`.
+- If one or more security tools fail, score from the successful tools only and say which
+  tools were unavailable.
 
 ### Dependencies (20)
 - If both `outdated.txt` and `libyear.txt` are available:
@@ -501,15 +556,37 @@ at `$OUT/index.html`.
 - 5: Many files with high complexity
 - 0: Files with complexity >50
 
+Interpretation rules for consistency:
+
+- Prefer RubyCritic for the primary complexity signal.
+- If RubyCritic is unavailable and Skunk succeeded, infer the closest matching band from the
+  top Skunk findings and state that complexity was scored from Skunk fallback data.
+- `Few files` means 1-3 files in the relevant band.
+- `Some files` means 4-10 files in the relevant band.
+- `Many files with high complexity` means more than 10 files above 20 complexity, or any
+  repeated concentration of top-ranked files in the 31-50 range.
+- If any file exceeds 50 complexity, score `0` regardless of lower-band counts.
+
 ### Coverage (20)
 - 20: >90% · 15: 70-90% · 10: 50-70% · 5: 30-50% · 0: <30%
 
+Round the reported coverage percentage to the nearest whole number before applying the band.
+
 ### Maintainability (20)
-- 20: 6 of 6 checks present
-- 15: 5 of 6 checks present
-- 10: 3-4 of 6 checks present
-- 5: 2 of 6 checks present
-- 0: 0-1 of 6 checks present
+- 20: Excellent setup, CI, documentation
+- 15: Good setup with minor gaps
+- 10: Adequate but needs improvement
+- 5: Significant maintainability issues
+- 0: Major maintainability problems
+
+Interpretation rules for consistency:
+
+- Use only the six machine-checkable checks from Step 9.
+- `Excellent setup, CI, documentation` = 6 of 6 checks present.
+- `Good setup with minor gaps` = 5 of 6 checks present.
+- `Adequate but needs improvement` = 3-4 of 6 checks present.
+- `Significant maintainability issues` = 2 of 6 checks present.
+- `Major maintainability problems` = 0-1 of 6 checks present.
 
 ## Important Notes
 
