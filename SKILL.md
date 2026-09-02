@@ -37,7 +37,7 @@ can be checked directly.
 
 - `Security`: `bundler-audit.txt`, `brakeman.txt`, `bundler-leak.txt`, `trivy.json`,
   `npm-audit.txt` or `yarn-audit.txt`
-- `Dependencies`: `outdated.txt`, `libyear.txt`, `npm-outdated.txt`
+- `Dependencies`: `bundle-outdated-strict.txt`, `libyear.txt`, `npm-outdated.txt`
 - `Coverage`: `coverage-last-run.json`
 - `Complexity`: `rubycritic.txt`, `skunk.txt`, RubyCritic HTML output
 - `Maintainability`: presence/absence checks for CI, setup scripts, setup docs,
@@ -61,9 +61,11 @@ Unless the user explicitly asks for a different scope, use these rules:
   the root lockfile in the target directory. For this skill, `yarn.lock` means use Yarn and
   `package-lock.json` means use npm. Do not generate a new lockfile just to make a tool run.
   Ignore nested lockfiles unless the user explicitly asks to include them.
-- Count dependencies from the authoritative lockfiles across all groups, including
-  development and test dependencies. They still affect local setup, CI, and supply-chain
-  risk.
+- For the Ruby dependency freshness score, count only direct RubyGems dependencies declared
+  in the root `Gemfile` across all groups. Exclude Git- and path-sourced dependencies, Ruby
+  default gems, and transitive dependencies from the numeric score. Report excluded updates
+  separately because they may still warrant review, but they are not actionable Gemfile
+  freshness debt.
 - Count repository-owned Dockerfiles and IaC misconfigurations reported by Trivy when they
   are inside the target directory and not in an excluded path. These findings affect the
   `Security` score.
@@ -82,19 +84,17 @@ rules below instead of guessing.
   successful tools and state which inputs were unavailable.
 - If the JS audit or outdated command does not match the repository's root lockfile, mark the
   JS portion of the run as non-comparable and do not mix those results into trend comparisons.
-- Treat `next_rails` output as unparseable if it contains placeholder freshness data such as
-  repeated `latest version, NOT FOUND`, repeated `latest_age: "-"`, or widespread
-  `Jan  2, 1980`/`1980-01-02` release dates. In that case, do not score from `outdated.txt`.
-- If `libyear-bundler` fails with a network or DNS error in the sandbox, retry it once with
-  network access. If the retried command succeeds, use the retried `libyear.txt` as the
-  authoritative dependency freshness input for that run.
-- `next_rails` failure or unparseable output with successful `libyear-bundler`: score
-  `Dependencies` from `libyear.txt` only.
-- `libyear-bundler` failure with successful and parseable `next_rails`: score `Dependencies`
-  from `outdated.txt` only.
-- If both dependency inputs fail or are unparseable, mark the dependency category as
-  unavailable in the report. Use `0` in the numeric table only because the template requires
-  a number, and explicitly say the category is unavailable rather than "bad".
+- Run `bundle outdated --strict --only-explicit --parseable` for Ruby dependency freshness.
+  It lists only updates permitted by the current `Gemfile` requirements and only direct
+  dependencies. Discard Git- and path-sourced entries and Ruby default gems before scoring.
+- If the command fails with a network, Git-source, or sandbox error, retry it once with the
+  access required to refresh the project's configured sources. If it still fails, mark the
+  Ruby dependency category unavailable. Use `0` in the numeric table only because the
+  template requires a number, and explicitly say the category is unavailable rather than
+  "bad".
+- `libyear-bundler` is informational only. Never use libyears, release age, or
+  `next_rails` output in the dependency score. They conflate intentional constraints and
+  transitive dependencies with actionable upgrades.
 - If the test suite cannot run but `coverage/.last_run.json` exists, use that file and mark
   coverage as stale.
 - If SimpleCov data is missing entirely, `Coverage` is `0`.
@@ -113,6 +113,10 @@ report appendix.
   inputs are materially comparable.
 - If the advisory snapshot or tool versions differ and you cannot normalize them, state
   `Security not directly comparable to prior runs`.
+- Record the exact Bundler version, the exact `bundle-outdated-strict.txt` output, and a
+  checksum of the root `Gemfile.lock`. Dependency-score comparisons are valid only when the
+  lockfile checksum and Bundler version are unchanged; newly published permitted releases can
+  otherwise change the result.
 
 ### 5. Deterministic scoring procedure
 
@@ -243,21 +247,34 @@ yarn audit > "$OUT/raw/yarn-audit.txt" 2>&1
 
 ### Ruby (if Gemfile exists)
 ```bash
-gem install next_rails --no-document
-# Run the gem executable directly and add its lib/ path explicitly.
-# Some Ruby 3.4 setups fail to load the global executable wrapper, and
-# next_rails 1.6.0 does not support the old --without-bundler flag.
-NEXT_RAILS_ROOT="$(ruby -e 'print Gem::Specification.find_by_name("next_rails").full_gem_path')"
-ruby -I"$NEXT_RAILS_ROOT/lib" "$NEXT_RAILS_ROOT/exe/bundle_report" outdated   > "$OUT/raw/outdated.txt" 2>&1
+# Exit status 1 means permitted updates exist. Retry only real failures (status > 1).
+if bundle outdated --strict --only-explicit --parseable > "$OUT/raw/bundle-outdated-strict.txt" 2>&1; then
+  BUNDLE_OUTDATED_STATUS=0
+else
+  BUNDLE_OUTDATED_STATUS=$?
+fi
+if [ "$BUNDLE_OUTDATED_STATUS" -gt 1 ]; then
+  mv "$OUT/raw/bundle-outdated-strict.txt" "$OUT/raw/bundle-outdated-strict-first-attempt.txt"
+  if bundle outdated --strict --only-explicit --parseable > "$OUT/raw/bundle-outdated-strict.txt" 2>&1; then
+    BUNDLE_OUTDATED_STATUS=0
+  else
+    BUNDLE_OUTDATED_STATUS=$?
+  fi
+fi
+printf '\n[exit status: %s]\n' "$BUNDLE_OUTDATED_STATUS" >> "$OUT/raw/bundle-outdated-strict.txt"
+bundle --version > "$OUT/raw/bundler-version.txt" 2>&1
+shasum -a 256 Gemfile.lock > "$OUT/raw/gemfile-lock.sha256" 2>&1
 
+# Informational only. Do not use this output in the dependency score.
 gem install libyear-bundler --no-document
 libyear-bundler --all > "$OUT/raw/libyear.txt" 2>&1
 ```
-If `outdated.txt` shows placeholder data such as `latest version, NOT FOUND`, `latest_age: "-"`,
-or widespread `Jan  2, 1980`/`1980-01-02` dates, treat it as unparseable and fall back to
-`libyear.txt`. If `libyear-bundler` fails with a network or DNS error, rerun that command once
-with network access before marking the dependency category unavailable. Track outdated percentage
-and total libyears behind only from parseable outputs.
+For the numeric score, parse only `bundle-outdated-strict.txt`. Its exit status of `1` means
+updates were found, not that the command failed. Determine the denominator from direct root
+`Gemfile` declarations that resolve from RubyGems, excluding Git/path declarations and Ruby
+default gems. Determine the numerator from the remaining lines in
+`bundle-outdated-strict.txt`. Include Git/path updates and libyear output in the report as
+informational context only.
 
 ### JavaScript (if package.json exists)
 ```bash
@@ -477,7 +494,7 @@ at `$OUT/index.html`.
    `<a href="https://github.com/presidentbeef/brakeman">brakeman</a>`,
    `<a href="https://github.com/rubymem/bundler-leak">bundler-leak</a>`,
    `<a href="https://github.com/aquasecurity/trivy">trivy</a>`,
-   `<a href="https://github.com/fastruby/next_rails">next_rails</a>`,
+   `<a href="https://bundler.io/man/bundle-outdated.1.html">bundle outdated</a>`,
    `<a href="https://github.com/jaredbeck/libyear-bundler">libyear-bundler</a>`,
    `<a href="https://github.com/simplecov-ruby/simplecov">simplecov</a>`,
    `<a href="https://github.com/whitesmith/rubycritic">rubycritic</a>`,
@@ -528,26 +545,16 @@ Interpretation rules for consistency:
   tools were unavailable.
 
 ### Dependencies (20)
-- If both `outdated.txt` and `libyear.txt` are available:
-- 20: <10% outdated, <5 libyears
-- 15: <20% outdated, <15 libyears
-- 10: <40% outdated, <30 libyears
-- 5: <60% outdated, <50 libyears
-- 0: >=60% outdated or >=50 libyears
-- If only `libyear.txt` is available:
-- 20: <5 libyears
-- 15: <15 libyears
-- 10: <30 libyears
-- 5: <50 libyears
-- 0: >=50 libyears
-- If only `outdated.txt` is available:
-- 20: <10% outdated
-- 15: <20% outdated
-- 10: <40% outdated
-- 5: <60% outdated
-- 0: >=60% outdated
-- If neither file is available, the category is unavailable. Use `0` in the numeric table and
-  explicitly state that the dependency score is unavailable due to tool failure.
+- Score from `bundle-outdated-strict.txt` only, after applying the direct-RubyGems exclusions
+  in Step 3.
+- 20: <10% of eligible direct dependencies have permitted updates
+- 15: <20% have permitted updates
+- 10: <40% have permitted updates
+- 5: <60% have permitted updates
+- 0: >=60% have permitted updates
+- If the strict Bundler command is unavailable after its retry, the category is unavailable.
+  Use `0` in the numeric table only for template compatibility and explicitly say the score is
+  unavailable due to command failure.
 
 ### Complexity (20)
 - 20: No files with complexity >10
