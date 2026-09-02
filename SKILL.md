@@ -161,6 +161,38 @@ land on the same result.
 - If a tool emits both a summary count and itemized rows, trust the summary count unless it is
   obviously inconsistent with the rows.
 
+### 8. Report detail contract
+
+Every successful audit must render the same evidence structure. Do not replace a required
+table with a prose summary, even when the category score is unchanged. If a required source
+cannot be parsed, render the table heading and an `Unavailable` row that names the missing
+source; do not silently omit it.
+
+- `Security`: show one tool-status table and one findings table. The status table lists every
+  security tool, its result, and whether its output was included in scoring. The findings table
+  lists every HIGH/CRITICAL finding and up to 10 MEDIUM findings, sorted by severity then
+  package or file path. State root-lock exclusions explicitly.
+- `Dependencies`: show the strict Bundler numerator, eligible direct-RubyGems denominator, and
+  resulting percentage. Show every included update in a table with current, permitted, and
+  requested versions. Show excluded Git/path/default-gem entries in a separate table. Never
+  collapse either table into prose. Show libyear only in a clearly labeled informational block.
+- `Coverage`: show command, freshness (`Fresh` or `Stale`), examples, failures, pending tests,
+  line numerator, line denominator, and percentage. If stale, name the source run and why a
+  fresh run was unavailable.
+- `RubyCritic`: show the overall score, total analyzed files, and two ranked tables: the top 10
+  files by complexity and the top 10 by churn. Each table includes file path and every metric
+  emitted by the RubyCritic HTML index. Embed both the overview and code-index screenshots.
+- `Skunk`: show modules analyzed, total, average, and worst score, followed by the top 10 rows
+  from the Skunk output with file, SkunkScore, churn, complexity/cost, and coverage.
+- `Rails Stats`: render both the complete code-stats table and the top 10 dependency-weight
+  rows. Do not replace these tables with aggregate prose.
+- `Maintainability`: render all six checks and their pass/fail state.
+- `Appendix`: list every tool attempted, version, raw-output path, exit status, and whether the
+  result contributed to scoring.
+
+For every ranked table, sort by the primary metric descending and file path or gem name
+ascending for ties. Preserve the fixed row counts above; show all rows when fewer exist.
+
 ---
 
 ## Step 0: Create the Timestamped Output Directory
@@ -317,6 +349,10 @@ rubycritic app lib --no-browser -p "$OUT/rubycritic" > "$OUT/raw/rubycritic.txt"
 This produces `$OUT/rubycritic/overview.html` (the scatter plot) plus `code_index.html`,
 `churn_index.html`, and `complexity_index.html`.
 
+Parse `code_index.html`, `churn_index.html`, and `complexity_index.html` into the required
+RubyCritic tables in the report-detail contract. These generated indexes, rather than a prose
+interpretation of the overall score, are the authoritative source for ranked RubyCritic detail.
+
 ### Capture screenshots
 
 Render the RubyCritic HTML with headless Chrome and save PNGs into `$OUT/screenshots/`.
@@ -457,11 +493,16 @@ at `$OUT/index.html`.
    like `<p class="empty">No vulnerabilities found.</p>`. Never leave a `{{PLACEHOLDER}}` in
    the final file.
 
-   - `{{RAILS_STATS_CONTENT}}`: the code-stats table from `rails-stats.txt` (code LOC, test
-     LOC, code-to-test ratio, polymorphic associations, schema `create_table` count).
-   - `{{BUNDLE_STATS_CONTENT}}`: the dependency table from the SAME `rails-stats.txt` (top gems
-     by total transitive dependency count), with a note on removal/replacement candidates.
-     There is no separate `bundle-stats.txt` — rails_stats emits this table itself.
+   Follow the report-detail contract above. The following source mappings are mandatory:
+
+   - `{{RAILS_STATS_CONTENT}}`: the complete code-stats table from `rails-stats.txt` (code LOC,
+     test LOC, code-to-test ratio, polymorphic associations, schema `create_table` count).
+   - `{{BUNDLE_STATS_CONTENT}}`: the top 10 dependency-weight rows from the SAME
+     `rails-stats.txt`, sorted by total transitive dependency count. There is no separate
+     `bundle-stats.txt` — rails_stats emits this table itself.
+   - `{{RUBYCRITIC_CONTENT}}`: the RubyCritic score, analyzed-file count, and both required top
+     10 tables parsed from RubyCritic's generated HTML indexes. Put the code-index screenshot in
+     `{{RUBYCRITIC_EXTRA_SHOTS}}` as an additional base64 `<div class="shot">` block.
    - `{{EXCEPTIONS_CONTENT}}`: if an exception-tracking gem was found (see Step 8), name it and
      mark it `<p class="empty">…</p>`. If none, use `<p class="flag">No exception tracking gem
      detected — the app cannot report production errors. This falls short of best practices;
